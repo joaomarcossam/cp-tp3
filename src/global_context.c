@@ -1,6 +1,6 @@
-#include <errno.h>
-#include <init_parser.h>
+#include <global_context.h>
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -16,12 +16,12 @@ N_STEPS: <size_t>
 dt: <double>
 <mass : double> <pos_x : double> <pos_y : double> <vel_x : double> <vel_y : double> {N}
 
-typedef struct InitInfo {
+typedef struct GlobalContext {
   size_t m_num_bodies;
   size_t m_num_steps;
   double m_dt;
   BodyInfo *m_bodies;
-} InitInfo;
+} GlobalContext;
 
 */
 
@@ -62,17 +62,6 @@ static char* str_aux_copy_until(char const *const str, char const character, siz
   return buffer;
 }
 
-// //Expects a null terminated string
-// static inline ssize_t cast_ssize(char const *const str) {
-//   char *temp;
-//   unsigned long long ret = strtoull(str, &temp, 10);
-//   if(ret >= ULLONG_MAX
-//     || temp == str
-//     || *temp != '\0')
-//     return SSIZE_MAX;
-//   return ret;
-// }
-
 //Expects a null terminated string
 static inline size_t cast_size(char const *const str) {
   char *temp;
@@ -96,26 +85,37 @@ static inline double cast_double(char const *const str, char **end_ptr) {
   return val;
 }
 
-#define PARSE_ERROR (InitInfo){0, 0, 0.0, NULL}
-#define RET(ret_val) \
+#define PARSE_ERROR (GlobalContext){0, 0, 0.0, NULL}
+#define RET_ERROR \
   do { \
     free(retval.m_bodies); \
-    retval = ret_val; \
     if(fptr != NULL) \
       fclose(fptr); \
     free(line_read); \
+    free(header_param_str); \
+    free(header_arg_val_str); \
+    return PARSE_ERROR; \
+  } while(0)
+
+#define RET_SUCCESS \
+  do { \
+    if(fptr != NULL) \
+      fclose(fptr); \
+    free(line_read); \
+    free(header_param_str); \
+    free(header_arg_val_str); \
     return retval; \
   } while(0)
 
-InitInfo init_parser_parse(const char *const path) {
+GlobalContext global_ctx_parse(const char *const path) {
   //VAR DECLARATIONS
-  InitInfo retval           = PARSE_ERROR; //INTERNAL PTR NEEDS FREE (in end)
+  GlobalContext retval      = PARSE_ERROR; //INTERNAL PTR NEEDS FREE (in end)
   FILE *fptr                = NULL; //NEEDS FREE (in end)
   size_t temp_size          = 0;
   char *temp_char_ptr       = NULL;
   char *line_read           = NULL; //NEEDS FREE (in end)
-  char *header_param_str    = NULL; //NEEDS FREE (inside for)
-  char *header_arg_val_str  = NULL; //NEEDS FREE (inside for)
+  char *header_param_str    = NULL; //NEEDS FREE (before assignment and in end)
+  char *header_arg_val_str  = NULL; //NEEDS FREE (before assignment and in end)
   char nbodies_set          = 0;
   char nsteps_set           = 0;
   char dt_set               = 0;
@@ -124,68 +124,65 @@ InitInfo init_parser_parse(const char *const path) {
   //HEADER PARSING
   fptr = fopen(path, "r");
   if(! fptr)
-    RET(PARSE_ERROR);
+    RET_ERROR;
   for(char op_line = 0; op_line < 3; op_line++) {
     if(getline(&line_read, &temp_size, fptr) == -1)
-      RET(PARSE_ERROR);
+      RET_ERROR;
     free(header_param_str);
     free(header_arg_val_str);
     header_param_str = str_aux_copy_until(line_read, ':', &temp_size);
     header_arg_val_str = str_aux_copy_until(line_read + temp_size + 1, '\n', &temp_size);
-    if((! header_param_str) || (! header_arg_val_str)) {
-      free(header_param_str);
-      free(header_arg_val_str);
-      RET(PARSE_ERROR);
-    }
+    if((! header_param_str) || (! header_arg_val_str))
+      RET_ERROR;
     if(! nsteps_set && strncmp("N_STEPS", header_param_str, 7) == 0) {
       if((temp_size = cast_size(header_arg_val_str)) == SIZE_MAX)
-        RET(PARSE_ERROR);
+        RET_ERROR;
       retval.m_num_steps = temp_size;
       nsteps_set = 1;
     }
     else if(! dt_set && strncmp("dt", header_param_str, 2) == 0) {
       temp_double = strtod(header_arg_val_str, &temp_char_ptr);
       if(*temp_char_ptr != '\0')
-        RET(PARSE_ERROR);
+        RET_ERROR;
       retval.m_dt = temp_double;
       dt_set = 1;
     }
     else if(! nbodies_set && header_param_str[0] == 'N') {
       if((temp_size = cast_size(header_arg_val_str)) == SIZE_MAX)
-        RET(PARSE_ERROR);
+        RET_ERROR;
       retval.m_num_bodies = temp_size;
       nbodies_set = 1;
     }
     else
-      RET(PARSE_ERROR);
+      RET_ERROR;
   }
 
   //BODIES PARSING
   retval.m_bodies = malloc(sizeof(BodyInfo) * retval.m_num_bodies);
   if(! retval.m_bodies)
-    RET(PARSE_ERROR);
+    RET_ERROR;
   for(size_t i = 0; i < retval.m_num_bodies; i++) {
     if(getline(&line_read, &temp_size, fptr) == -1)
-      RET(PARSE_ERROR);
+      RET_ERROR;
     retval.m_bodies[i].m_mass   = cast_double(line_read, &temp_char_ptr);
-    retval.m_bodies[i].m_pos_x  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    retval.m_bodies[i].m_pos_y  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    retval.m_bodies[i].m_spd_x  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    retval.m_bodies[i].m_spd_y  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    retval.m_bodies[i].m_pos.m_1  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    retval.m_bodies[i].m_pos.m_2  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    retval.m_bodies[i].m_spd.m_1  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    retval.m_bodies[i].m_spd.m_2  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
     if(retval.m_bodies[i].m_mass   == DBL_MAX
-      || retval.m_bodies[i].m_pos_x  == DBL_MAX
-      || retval.m_bodies[i].m_pos_y  == DBL_MAX
-      || retval.m_bodies[i].m_spd_y  == DBL_MAX
-      || retval.m_bodies[i].m_spd_y  == DBL_MAX)
-      RET(PARSE_ERROR);
+      || retval.m_bodies[i].m_pos.m_1  == DBL_MAX
+      || retval.m_bodies[i].m_pos.m_2  == DBL_MAX
+      || retval.m_bodies[i].m_spd.m_1  == DBL_MAX
+      || retval.m_bodies[i].m_spd.m_2  == DBL_MAX)
+      RET_ERROR;
   }
-  return retval;
+  RET_SUCCESS;
 }
 
 #undef PARSE_ERROR
 #undef RET
 
-inline void init_parser_free(InitInfo *ptr_to_auto_var) {
+inline void global_ctx_free(GlobalContext *ptr_to_auto_var) {
   free(ptr_to_auto_var->m_bodies);
   ptr_to_auto_var->m_bodies = NULL;
   ptr_to_auto_var->m_num_bodies = 0;
@@ -193,23 +190,23 @@ inline void init_parser_free(InitInfo *ptr_to_auto_var) {
   ptr_to_auto_var->m_num_steps = 0;
 }
 
-void init_parser_log(const InitInfo *const iptr) {
+void global_ctx_log(const GlobalContext *const iptr) {
   if(! iptr || ! iptr->m_bodies)
     return;
-  printf("InitInfo {num_bodies = %zu, num_steps = %zu, dt = %.3lf, bodies ="
+  printf("GlobalContext {num_bodies = %zu, num_steps = %zu, dt = %.3lf, bodies ="
     , iptr->m_num_bodies
     , iptr->m_num_steps
     , iptr->m_dt);
   for(size_t i = 0; i < iptr->m_num_bodies; i++)
-    printf("\n\tBodyInfo {mass = %.3lf, pos = [%.3lf, %.3lf], spd = [%.3lf, %.3lf]},"
+    printf("\n\tBodyInfo {mass = %.3e, pos = [%.3e, %.3e], spd = [%.3e, %.3e]},"
       , iptr->m_bodies[i].m_mass
-      , iptr->m_bodies[i].m_pos_x
-      , iptr->m_bodies[i].m_pos_y
-      , iptr->m_bodies[i].m_spd_x
-      , iptr->m_bodies[i].m_spd_y);
+      , iptr->m_bodies[i].m_pos.m_1
+      , iptr->m_bodies[i].m_pos.m_2
+      , iptr->m_bodies[i].m_spd.m_1
+      , iptr->m_bodies[i].m_spd.m_2);
   printf("}");
 }
 
-inline char init_parser_is_null(InitInfo const *const iptr) {
+inline char global_ctx_is_null(GlobalContext const *const iptr) {
   return (iptr == NULL || iptr->m_bodies == NULL);
 }
