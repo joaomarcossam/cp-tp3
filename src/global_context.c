@@ -9,22 +9,6 @@
 #include <float.h>
 #include <sys/types.h>
 
-/* FILE FORMAT
-
-N: <size_t>
-N_STEPS: <size_t>
-dt: <double>
-<mass : double> <pos_x : double> <pos_y : double> <vel_x : double> <vel_y : double> {N}
-
-typedef struct GlobalContext {
-  size_t m_num_bodies;
-  size_t m_num_steps;
-  double m_dt;
-  BodyInfo *m_bodies;
-} GlobalContext;
-
-*/
-
 //Works only on null terminated strings
 //Char_read arg may be null if you don't want to know how many chars were read
 static char* str_aux_copy_until(char const *const str, char const character, size_t *char_read) {
@@ -85,6 +69,14 @@ static inline double cast_double(char const *const str, char **end_ptr) {
   return val;
 }
 
+inline BodyInfo* global_ctx_access_body(GlobalContext const *const iptr, size_t idx) {
+  return idx >= iptr->m_num_bodies ? NULL : iptr->m_bodies + (5 * idx);
+}
+
+inline double* global_ctx_body_access_member(BodyInfo *const bip, BodyInfoMemberIdx idx) {
+  return (idx < 0 || idx > 4) ? NULL : bip + idx;
+}
+
 #define PARSE_ERROR (GlobalContext){0, 0, 0.0, NULL}
 #define RET_ERROR \
   do { \
@@ -109,13 +101,13 @@ static inline double cast_double(char const *const str, char **end_ptr) {
 
 GlobalContext global_ctx_parse(const char *const path) {
   //VAR DECLARATIONS
-  GlobalContext retval      = PARSE_ERROR; //INTERNAL PTR NEEDS FREE (in end)
-  FILE *fptr                = NULL; //NEEDS FREE (in end)
+  GlobalContext retval      = PARSE_ERROR;  //INTERNAL PTR NEEDS FREE (in end if error)
+  FILE *fptr                = NULL;         //NEEDS FREE (in end)
   size_t temp_size          = 0;
   char *temp_char_ptr       = NULL;
-  char *line_read           = NULL; //NEEDS FREE (in end)
-  char *header_param_str    = NULL; //NEEDS FREE (before assignment and in end)
-  char *header_arg_val_str  = NULL; //NEEDS FREE (before assignment and in end)
+  char *line_read           = NULL;         //NEEDS FREE (in end)
+  char *header_param_str    = NULL;         //NEEDS FREE (before assignment and in end)
+  char *header_arg_val_str  = NULL;         //NEEDS FREE (before assignment and in end)
   char nbodies_set          = 0;
   char nsteps_set           = 0;
   char dt_set               = 0;
@@ -158,23 +150,38 @@ GlobalContext global_ctx_parse(const char *const path) {
   }
 
   //BODIES PARSING
-  retval.m_bodies = malloc(sizeof(BodyInfo) * retval.m_num_bodies);
+  retval.m_bodies = malloc(sizeof(double) * retval.m_num_bodies * 5);
   if(! retval.m_bodies)
     RET_ERROR;
   for(size_t i = 0; i < retval.m_num_bodies; i++) {
     if(getline(&line_read, &temp_size, fptr) == -1)
       RET_ERROR;
-    retval.m_bodies[i].m_mass   = cast_double(line_read, &temp_char_ptr);
-    retval.m_bodies[i].m_pos.m_1  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    retval.m_bodies[i].m_pos.m_2  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    retval.m_bodies[i].m_spd.m_1  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    retval.m_bodies[i].m_spd.m_2  = cast_double(temp_char_ptr + 1, &temp_char_ptr);
-    if(retval.m_bodies[i].m_mass   == DBL_MAX
-      || retval.m_bodies[i].m_pos.m_1  == DBL_MAX
-      || retval.m_bodies[i].m_pos.m_2  == DBL_MAX
-      || retval.m_bodies[i].m_spd.m_1  == DBL_MAX
-      || retval.m_bodies[i].m_spd.m_2  == DBL_MAX)
+    BodyInfo *const info = global_ctx_access_body(&retval, i);
+    
+    temp_double = cast_double(line_read, &temp_char_ptr);
+    if(temp_double == DBL_MAX || *temp_char_ptr != ' ')
       RET_ERROR;
+    *global_ctx_body_access_member(info, BI_MASS) = temp_double;
+
+    temp_double = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    if(temp_double == DBL_MAX || *temp_char_ptr != ' ')
+      RET_ERROR;
+    *global_ctx_body_access_member(info, BI_POS_X) = temp_double;
+    
+    temp_double = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    if(temp_double == DBL_MAX || *temp_char_ptr != ' ')
+      RET_ERROR;
+    *global_ctx_body_access_member(info, BI_POS_Y) = temp_double;
+
+    temp_double = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    if(temp_double == DBL_MAX || *temp_char_ptr != ' ')
+      RET_ERROR;
+    *global_ctx_body_access_member(info, BI_SPD_X) = temp_double;
+
+    temp_double = cast_double(temp_char_ptr + 1, &temp_char_ptr);
+    if(temp_double == DBL_MAX || (*temp_char_ptr != '\n' && *temp_char_ptr != '\0'))
+      RET_ERROR;
+    *global_ctx_body_access_member(info, BI_SPD_Y) = temp_double;
   }
   RET_SUCCESS;
 }
@@ -182,7 +189,7 @@ GlobalContext global_ctx_parse(const char *const path) {
 #undef PARSE_ERROR
 #undef RET
 
-inline void global_ctx_free(GlobalContext *ptr_to_auto_var) {
+inline void global_ctx_free(GlobalContext *const ptr_to_auto_var) {
   free(ptr_to_auto_var->m_bodies);
   ptr_to_auto_var->m_bodies = NULL;
   ptr_to_auto_var->m_num_bodies = 0;
@@ -197,13 +204,15 @@ void global_ctx_log(const GlobalContext *const iptr) {
     , iptr->m_num_bodies
     , iptr->m_num_steps
     , iptr->m_dt);
-  for(size_t i = 0; i < iptr->m_num_bodies; i++)
+  for(size_t i = 0; i < iptr->m_num_bodies; i++) {
+    BodyInfo *const info = global_ctx_access_body(iptr, i);
     printf("\n\tBodyInfo {mass = %.3e, pos = [%.3e, %.3e], spd = [%.3e, %.3e]},"
-      , iptr->m_bodies[i].m_mass
-      , iptr->m_bodies[i].m_pos.m_1
-      , iptr->m_bodies[i].m_pos.m_2
-      , iptr->m_bodies[i].m_spd.m_1
-      , iptr->m_bodies[i].m_spd.m_2);
+      , *global_ctx_body_access_member(info, BI_MASS)
+      , *global_ctx_body_access_member(info, BI_POS_X)
+      , *global_ctx_body_access_member(info, BI_POS_Y)
+      , *global_ctx_body_access_member(info, BI_SPD_X)
+      , *global_ctx_body_access_member(info, BI_SPD_Y));
+  }   
   printf("}");
 }
 

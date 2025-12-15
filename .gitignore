@@ -1,4 +1,5 @@
 .vscode
 .build
+.local
 build/
 compile_commands.json
