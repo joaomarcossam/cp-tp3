@@ -18,7 +18,6 @@ Tuple(double, double) get_gforce(BodyInfo b1, BodyInfo b2){
 }
 
 void get_acceleration_array(BodyInfo* bodies, size_t num_bodies, Tuple(double, double)* acc_vector){
-    // Se não precisar da força, dá pra remover a massa do fator de força e da acelação
     Tuple(double, double) force_sum;
     Tuple(double, double) current_gforce;
     for(size_t i = 0; i < num_bodies; i++){
