@@ -1,8 +1,6 @@
 #ifndef MACROS_H
 #define MACROS_H
 
-#include <sys/types.h>
-
 #define deref_as(TYPE, DATA) (*(TYPE*)(DATA))
 #define MIN(A, B) ((A) < (B) ? (A) : (B))
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
@@ -14,16 +12,6 @@
 #define STRINGIZE(A) STRINGIZE_SIMPLE(A)
 
 #define MACRO_VAR(BASE_NAME) CONCAT(BASE_NAME, __LINE__)
-
-#ifdef LOG_CODE_ENABLED
-#include <stdio.h>
-#include <inttypes.h>
-#include <string.h>
-#define SHORT_FILE (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define LOG(fmt, ...) printf("[LOG F%s L%d] -> " fmt "\n", SHORT_FILE, __LINE__, ##__VA_ARGS__)
-#else
-#define LOG(fmt, ...) 
-#endif
 
 #define COUNT_IMPL(n1, n2, n3, n4, n5, n6, n7, n8, n9, n10, n11, n12, N, ...) N
 #define COUNT(...) COUNT_IMPL(__VA_ARGS__, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
